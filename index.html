@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Emoji Snake 🐍</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    color: #eee;
+    overflow: hidden;
+  }
+  h1 { font-size: 2rem; margin-bottom: 8px; }
+  #score-bar {
+    display: flex;
+    gap: 24px;
+    font-size: 1.1rem;
+    margin-bottom: 10px;
+  }
+  #score-bar span { opacity: 0.7; }
+  #board {
+    display: grid;
+    gap: 1px;
+    background: #16213e;
+    border: 2px solid #0f3460;
+    border-radius: 8px;
+    padding: 4px;
+    box-shadow: 0 0 30px rgba(15, 52, 96, 0.5);
+  }
+  .cell {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    border-radius: 3px;
+    background: #1a1a2e;
+    transition: background 0.1s;
+  }
+  .cell.snake-head { background: #2d6a4f; }
+  .cell.snake-body { background: #1b4332; }
+  .cell.food { animation: pulse 0.6s ease-in-out infinite alternate; }
+  @keyframes pulse { to { transform: scale(1.2); } }
+  #overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+  }
+  #overlay.hidden { display: none; }
+  #overlay h2 { font-size: 2.5rem; margin-bottom: 12px; }
+  #overlay p { font-size: 1.2rem; opacity: 0.8; margin-bottom: 20px; }
+  #overlay button {
+    padding: 12px 32px;
+    font-size: 1.1rem;
+    border: none;
+    border-radius: 8px;
+    background: #e94560;
+    color: white;
+    cursor: pointer;
+    transition: transform 0.1s;
+  }
+  #overlay button:hover { transform: scale(1.05); }
+  #controls {
+    margin-top: 16px;
+    opacity: 0.5;
+    font-size: 0.85rem;
+  }
+  /* Mobile touch controls */
+  #touch-controls {
+    display: none;
+    margin-top: 16px;
+    gap: 4px;
+  }
+  #touch-controls button {
+    width: 56px;
+    height: 56px;
+    font-size: 24px;
+    border: none;
+    border-radius: 8px;
+    background: #0f3460;
+    color: white;
+    cursor: pointer;
+  }
+  @media (pointer: coarse) {
+    #touch-controls { display: grid; grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(2, 56px); justify-items: center; }
+    #controls { display: none; }
+    .cell { width: 24px; height: 24px; font-size: 15px; }
+  }
+</style>
+</head>
+<body>
+
+<h1>🐍 Emoji Snake</h1>
+<div id="score-bar">
+  <div>Score: <span id="score">0</span></div>
+  <div>Best: <span id="best">0</span></div>
+</div>
+<div id="board"></div>
+<div id="controls">Arrow keys or WASD to move</div>
+<div id="touch-controls">
+  <div></div><button onclick="setDir(0,-1)">⬆️</button><div></div>
+  <button onclick="setDir(-1,0)">⬅️</button><button onclick="setDir(0,1)">⬇️</button><button onclick="setDir(1,0)">➡️</button>
+</div>
+
+<div id="overlay">
+  <h2 id="overlay-title">🐍 Emoji Snake</h2>
+  <p id="overlay-msg">Eat emoji, grow long, don't crash!</p>
+  <button id="start-btn" onclick="startGame()">Play</button>
+</div>
+
+<script>
+const COLS = 17, ROWS = 15;
+const FOODS = ['🍎','🍕','🌮','🍩','🍪','🧁','🍉','🍇','🍌','🥑','🌶️','🍔','🥐','🍣','🎮','⭐','💎','🔥','🎵','🦋','🌸','🍀'];
+const board = document.getElementById('board');
+const scoreEl = document.getElementById('score');
+const bestEl = document.getElementById('best');
+const overlay = document.getElementById('overlay');
+const overlayTitle = document.getElementById('overlay-title');
+const overlayMsg = document.getElementById('overlay-msg');
+
+let cells = [], snake = [], dir = {x:1,y:0}, nextDir = {x:1,y:0};
+let food = null, foodEmoji = '', score = 0, best = 0, gameLoop = null, speed = 150;
+
+board.style.gridTemplateColumns = `repeat(${COLS}, 32px)`;
+
+// Build grid
+for (let y = 0; y < ROWS; y++) {
+  for (let x = 0; x < COLS; x++) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    board.appendChild(cell);
+    if (!cells[y]) cells[y] = [];
+    cells[y][x] = cell;
+  }
+}
+
+// Responsive cell size
+function adjustSize() {
+  const isTouch = matchMedia('(pointer: coarse)').matches;
+  const size = isTouch ? 24 : 32;
+  board.style.gridTemplateColumns = `repeat(${COLS}, ${size}px)`;
+  document.querySelectorAll('.cell').forEach(c => { c.style.width = size+'px'; c.style.height = size+'px'; c.style.fontSize = (size-10)+'px'; });
+}
+adjustSize();
+
+function clearBoard() {
+  for (let y = 0; y < ROWS; y++)
+    for (let x = 0; x < COLS; x++) {
+      cells[y][x].textContent = '';
+      cells[y][x].className = 'cell';
+    }
+}
+
+function placeFood() {
+  let open = [];
+  for (let y = 0; y < ROWS; y++)
+    for (let x = 0; x < COLS; x++)
+      if (!snake.some(s => s.x === x && s.y === y)) open.push({x, y});
+  food = open[Math.floor(Math.random() * open.length)];
+  foodEmoji = FOODS[Math.floor(Math.random() * FOODS.length)];
+}
+
+function draw() {
+  clearBoard();
+  // Food
+  if (food) {
+    cells[food.y][food.x].textContent = foodEmoji;
+    cells[food.y][food.x].classList.add('food');
+  }
+  // Snake
+  snake.forEach((s, i) => {
+    if (i === 0) {
+      cells[s.y][s.x].textContent = '😎';
+      cells[s.y][s.x].classList.add('snake-head');
+    } else {
+      cells[s.y][s.x].textContent = '🟢';
+      cells[s.y][s.x].classList.add('snake-body');
+    }
+  });
+}
+
+function tick() {
+  dir = {...nextDir};
+  const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+
+  // Wall collision
+  if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS) return gameOver();
+  // Self collision
+  if (snake.some(s => s.x === head.x && s.y === head.y)) return gameOver();
+
+  snake.unshift(head);
+
+  if (head.x === food.x && head.y === food.y) {
+    score++;
+    scoreEl.textContent = score;
+    if (score > best) { best = score; bestEl.textContent = best; }
+    placeFood();
+    // Speed up slightly
+    if (speed > 80) { speed -= 2; clearInterval(gameLoop); gameLoop = setInterval(tick, speed); }
+  } else {
+    snake.pop();
+  }
+
+  draw();
+}
+
+function gameOver() {
+  clearInterval(gameLoop);
+  gameLoop = null;
+  // Flash the head
+  cells[snake[0].y][snake[0].x].textContent = '💀';
+  overlayTitle.textContent = '💀 Game Over!';
+  overlayMsg.textContent = `Score: ${score} ${score >= best && score > 0 ? '🏆 New Best!' : ''}`;
+  document.getElementById('start-btn').textContent = 'Play Again';
+  setTimeout(() => overlay.classList.remove('hidden'), 500);
+}
+
+function startGame() {
+  overlay.classList.add('hidden');
+  score = 0;
+  speed = 150;
+  scoreEl.textContent = '0';
+  snake = [
+    {x: Math.floor(COLS/2), y: Math.floor(ROWS/2)},
+    {x: Math.floor(COLS/2)-1, y: Math.floor(ROWS/2)},
+    {x: Math.floor(COLS/2)-2, y: Math.floor(ROWS/2)}
+  ];
+  dir = {x:1, y:0};
+  nextDir = {x:1, y:0};
+  placeFood();
+  draw();
+  if (gameLoop) clearInterval(gameLoop);
+  gameLoop = setInterval(tick, speed);
+}
+
+function setDir(x, y) {
+  // Prevent 180-degree turns
+  if (dir.x === -x && dir.y === -y) return;
+  nextDir = {x, y};
+}
+
+document.addEventListener('keydown', e => {
+  switch(e.key) {
+    case 'ArrowUp': case 'w': case 'W': e.preventDefault(); setDir(0,-1); break;
+    case 'ArrowDown': case 's': case 'S': e.preventDefault(); setDir(0,1); break;
+    case 'ArrowLeft': case 'a': case 'A': e.preventDefault(); setDir(-1,0); break;
+    case 'ArrowRight': case 'd': case 'D': e.preventDefault(); setDir(1,0); break;
+  }
+});
+</script>
+</body>
+</html>
